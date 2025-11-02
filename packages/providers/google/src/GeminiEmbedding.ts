@@ -43,12 +43,50 @@ export class GeminiEmbedding extends BaseEmbedding {
     this.embedBatchSize = opts?.embedBatchSize ?? DEFAULT_EMBED_BATCH_SIZE;
   }
 
+  // Add a retry wrapper for embedContent to handle rate limits (5s wait, up to 20 tries)
+  private async embedWithRetry(args: {
+    model: string;
+    contents: string | string[];
+  }) {
+    const MAX_TRIES = 20;
+    const DELAY_MS = 5000;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const isRateLimitError = (err: any) => {
+      if (!err) return false;
+      return err.code === 429 || String(err.status) === "RESOURCE_EXHAUSTED";
+    };
+
+    const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let lastErr: any = null;
+    for (let attempt = 1; attempt <= MAX_TRIES; attempt++) {
+      try {
+        return await this.ai.models.embedContent(args);
+      } catch (err) {
+        lastErr = err;
+        if (isRateLimitError(err) && attempt < MAX_TRIES) {
+          await sleep(DELAY_MS);
+          continue;
+        }
+        throw err;
+      }
+    }
+    // If we exit loop unexpectedly, throw the last error.
+    throw lastErr;
+  }
+
   getTextEmbeddings = async (texts: string[]) => {
-    const result = await this.ai.models.embedContent({
+    const result = await this.embedWithRetry({
       model: this.model,
       contents: texts,
     });
-    return result.embeddings?.map((embedding) => embedding.values ?? []) ?? [];
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (
+      result.embeddings?.map((embedding: any) => embedding.values ?? []) ?? []
+    );
   };
 
   async getTextEmbeddingsBatch(
@@ -64,7 +102,7 @@ export class GeminiEmbedding extends BaseEmbedding {
   }
 
   async getTextEmbedding(text: string): Promise<number[]> {
-    const result = await this.ai.models.embedContent({
+    const result = await this.embedWithRetry({
       model: this.model,
       contents: text,
     });
