@@ -54,8 +54,14 @@ export class GeminiEmbedding extends BaseEmbedding {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const isRateLimitError = (err: any) => {
       if (!err) return false;
-      return err.code === 429 || String(err.status) === "RESOURCE_EXHAUSTED";
+      return (
+        err.status === 429 ||
+        err.message.indexOf('"status":"RESOURCE_EXHAUSTED"') !== -1
+      );
     };
+    /* error looks like this
+      {"error":{"code":429,"message":"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/usage?tab=rate-limit. \n* Quota exceeded for metric: generativelanguage.googleapis.com/embed_content_paid_tier_requests, limit: 0","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.Help","links":[{"description":"Learn more about Gemini API quotas","url":"https://ai.google.dev/gemini-api/docs/rate-limits"}]},{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"quotaMetric":"generativelanguage.googleapis.com/embed_content_paid_tier_requests","quotaId":"EmbedContentPerMinutePerProjectPerUserPerModel-PaidTier"}]}]}}
+    */
 
     const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
@@ -68,6 +74,9 @@ export class GeminiEmbedding extends BaseEmbedding {
         lastErr = err;
         if (isRateLimitError(err) && attempt < MAX_TRIES) {
           await sleep(DELAY_MS);
+          console.debug(
+            `Gemini Embeddings rate limit error encountered. Retrying attempt ${attempt}...`,
+          );
           continue;
         }
         throw err;
@@ -83,8 +92,8 @@ export class GeminiEmbedding extends BaseEmbedding {
       contents: texts,
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       result.embeddings?.map((embedding: any) => embedding.values ?? []) ?? []
     );
   };
